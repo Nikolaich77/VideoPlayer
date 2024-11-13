@@ -4,41 +4,44 @@ import logging
 from datetime import datetime
 
 class HistoryManager:
-    def __init__(self, filename="history.json"):
-        self.filename = filename
-        self.history = self.load_history()
+    def __init__(self, history_filename="history.json", favorites_filename="favorites.json"):
+        self.history_filename = history_filename
+        self.favorites_filename = favorites_filename
+        self.history = self.load_data(self.history_filename)
+        self.favorites = self.load_data(self.favorites_filename)
 
-    def load_history(self):
+    def load_data(self, filename):
+        """Завантажує дані з файлу."""
         try:
-            if os.path.exists(self.filename):
-                with open(self.filename, "r", encoding='utf-8') as file:
+            if os.path.exists(filename):
+                with open(filename, "r", encoding='utf-8') as file:
                     return json.load(file)
             return []
         except Exception as e:
-            logging.error(f"Error loading history: {str(e)}")
+            print(f"Error loading {filename}: {e}")
             return []
 
-    def save_history(self):
+    def save_data(self, filename, data):
+        """Зберігає дані в файл."""
         try:
-            with open(self.filename, "w", encoding='utf-8') as file:
-                json.dump(self.history, file, ensure_ascii=False, indent=4)
+            with open(filename, "w", encoding='utf-8') as file:
+                json.dump(data, file, ensure_ascii=False, indent=4)
         except Exception as e:
-            logging.error(f"Error saving history: {str(e)}")
+            print(f"Error saving {filename}: {e}")
 
-    def add_to_history(self, video_path, timestamp, duration, volume):
-        try:
-            entry = {
-                "path": video_path,
-                "timestamp": timestamp,
-                "duration": duration,
-                "volume": volume,
-                "date_added": datetime.now().isoformat()
-            }
-            self.history.append(entry)
-            self.save_history()
-        except Exception as e:
-            logging.error(f"Error adding to history: {str(e)}")
+    def add_to_history(self, filename, time_code):
+        """Додає файл до історії."""
+        self.history.append({"filename": filename, "time_code": time_code})
+        self.save_data(self.history_filename, self.history)
 
-    def clear_history(self):
-        self.history = []
-        self.save_history()
+    def add_to_favorites(self, filename):
+        """Додає файл в улюблені."""
+        if filename not in self.favorites:
+            self.favorites.append(filename)
+            self.save_data(self.favorites_filename, self.favorites)
+
+    def remove_from_favorites(self, filename):
+        """Видаляє файл з улюблених."""
+        if filename in self.favorites:
+            self.favorites.remove(filename)
+            self.save_data(self.favorites_filename, self.favorites)

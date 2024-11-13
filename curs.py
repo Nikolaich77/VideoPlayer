@@ -3,7 +3,7 @@ import os
 from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtWidgets import (QMessageBox, QLabel, 
                            QSlider, QAction, QFileDialog,
-                           QVBoxLayout, QHBoxLayout)
+                           QVBoxLayout, QHBoxLayout, QDockWidget, QHBoxLayout, QListWidget, QPushButton, QWidget)
 from PyQt5.QtCore import Qt, QTimer
 from pathlib import Path
 import logging
@@ -30,19 +30,99 @@ class VideoPlayer(QtWidgets.QMainWindow):
         self.history_manager = HistoryManager()
         self.playlist_manager = PlaylistManager()
         self.last_directory = str(Path.home())
-        
+
+        # Створення бокової панелі
+        self.create_side_panel()
         self.setup_ui()
         self.setup_shortcuts()
         self.setup_menu()
         
         # Load saved settings
         self.settings_manager.load_window_state(self)
+
+        # Завантажуємо історію та улюблені файли в інтерфейс
+        self.update_lists()  # Оновлюємо інтерфейс для історії та улюблених
         
         # Initialize media controller and state
         self.media_controller = MediaController(self.video_frame)
         self.playlist = []
         self.current_index = -1
         
+    def create_side_panel(self):
+        """Створення бічної панелі для відображення історії та улюблених файлів."""
+        if not hasattr(self, 'dock_widget'):  # Перевірка чи вже є dock_widget
+            self.dock_widget = QDockWidget("Side Panel", self)  # Створюємо тільки якщо ще не існує
+            self.dock_widget.setObjectName("SidePanel")  # Встановлюємо objectName
+            self.dock_widget.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+
+            side_panel_widget = QWidget()
+            side_panel_layout = QVBoxLayout()
+
+            # Список для улюблених
+            self.favorites_list = QListWidget()
+            side_panel_layout.addWidget(self.favorites_list)
+
+            # Кнопка для додавання в улюблене
+            add_favorite_button = QPushButton("Add to Favorites")
+            add_favorite_button.clicked.connect(self.add_to_favorites)
+            side_panel_layout.addWidget(add_favorite_button)
+
+            # Кнопка для видалення з улюбленого
+            remove_favorite_button = QPushButton("Remove from Favorites")
+            remove_favorite_button.clicked.connect(self.remove_from_favorites)
+            side_panel_layout.addWidget(remove_favorite_button)
+
+            # Список для історії
+            self.history_list = QListWidget()
+            side_panel_layout.addWidget(self.history_list)
+
+            side_panel_widget.setLayout(side_panel_layout)
+            self.dock_widget.setWidget(side_panel_widget)
+            self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_widget)
+
+    def add_to_history(self, filename, time_code):
+        """Додає файл до історії вручну (як приклад)."""
+        # Перевірка, чи є вже файл в історії
+        if not any(item['filename'] == filename for item in self.history_manager.history):
+            self.history_manager.add_to_history(filename, time_code)
+            self.update_lists()
+
+    def add_to_favorites(self):
+        """Додає файл в улюблені вручну (як приклад)."""
+        current_file = self.current_file  # або отримати назву файлу з іншого місця
+        if current_file:  # Перевірка, чи файл є
+            self.history_manager.add_to_favorites(current_file)
+            self.update_lists()
+
+    def remove_from_favorites(self):
+        """Видаляє файл з улюблених вручну (як приклад)."""
+        # Отримуємо вибраний елемент зі списку
+        selected_item = self.favorites_list.currentItem()
+        if selected_item:
+            filename = selected_item.text()  # Отримуємо назву файлу з тексту елемента списку
+            self.history_manager.remove_from_favorites(filename)  # Видаляємо з улюблених
+            self.update_lists()  # Оновлюємо список на інтерфейсі
+
+    def update_lists(self):
+        """Оновлює списки на боковій панелі для історії та улюблених."""
+        # Оновлюємо список історії
+        self.history_list.clear()
+        for item in self.history_manager.history:
+            self.history_list.addItem(f"{item['filename']} - {item['time_code']}")
+
+        # Оновлюємо список улюблених
+        self.favorites_list.clear()
+        for item in self.history_manager.favorites:
+            self.favorites_list.addItem(item)  # Переконатися, що це рядок
+
+    def play_file(self, filename, time_code):
+        """При відтворенні файлу додаємо його в історію."""
+        # Перевірка, чи вже є файл у історії
+        if not any(item['filename'] == filename for item in self.history_manager.history):
+            self.history_manager.add_to_history(filename, time_code)
+            self.update_lists()
+        print(f"Playing {filename} at {time_code}")
+
     def setup_timer(self):
         # Update the video time and slider every 500ms
         self.update_timer.timeout.connect(self.update_time)
@@ -120,7 +200,9 @@ class VideoPlayer(QtWidgets.QMainWindow):
     def add_to_recent_files(self, file_path):
         """Додає файл до списку нещодавно відкритих файлів."""
         if file_path not in self.history_manager.history:
-            self.history_manager.add_to_history(file_path, 0, 0, 50)  # Зберігає файл з базовими значеннями
+            time_code = self.media_controller.get_time()  # Отримуємо поточний час відео в мілісекундах
+            time_code = self.format_time(time_code)  # Перетворюємо мілісекунди в формат hh:mm:ss
+            self.history_manager.add_to_history(file_path, time_code)  # Зберігає файл з базовими значеннями
 
     def save_recent_files(self):
         """Зберігає список нещодавно відкритих файлів."""
@@ -130,7 +212,10 @@ class VideoPlayer(QtWidgets.QMainWindow):
         """Load a video and play it."""
         if self.media_controller.set_media(file_path):
             self.media_controller.play()
-            self.history_manager.add_to_history(file_path, 0, self.media_controller.get_length(), self.media_controller.get_volume())
+            time_code = self.media_controller.get_time()  # Отримуємо поточний час відео в мілісекундах
+            time_code = self.format_time(time_code)  # Перетворюємо мілісекунди в формат hh:mm:ss
+            self.history_manager.add_to_history(file_path, time_code)
+            self.update_lists()  # Оновлюємо інтерфейс з новим відео
 
     def load_recent_files(self):
         """Load recently opened files from history."""
@@ -246,12 +331,30 @@ class VideoPlayer(QtWidgets.QMainWindow):
         view_menu.addAction(fullscreen_action)
 
     def setup_shortcuts(self):
+        """Setup keyboard shortcuts for various actions."""
+        # Shortcut for adding to favorites (Ctrl+Shift+F)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+F"), self, self.add_to_favorites)
+
+        # Shortcut for removing from favorites (Ctrl+Shift+R)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+R"), self, self.remove_from_favorites)
+
+        # Shortcut for opening/closing the side panel (Ctrl+P)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+P"), self, self.toggle_side_panel)
+
         # Playback shortcuts
         QtWidgets.QShortcut(QtGui.QKeySequence("Space"), self, self.toggle_play_pause)
         QtWidgets.QShortcut(QtGui.QKeySequence("Left"), self, self.seek_backward)
         QtWidgets.QShortcut(QtGui.QKeySequence("Right"), self, self.seek_forward)
         QtWidgets.QShortcut(QtGui.QKeySequence("Up"), self, self.volume_up)
         QtWidgets.QShortcut(QtGui.QKeySequence("Down"), self, self.volume_down)
+
+    def toggle_side_panel(self):
+            """Toggle the visibility of the side panel."""
+            if hasattr(self, 'dock_widget'):
+                if self.dock_widget.isVisible():
+                    self.dock_widget.hide()
+                else:
+                    self.dock_widget.show()
 
     def setup_timer(self):
         self.update_timer = QTimer(self)
